@@ -1,0 +1,32 @@
+{
+  "name": "reimbursements-online",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Turn a pile of receipts into a polished reimbursement spreadsheet — client-side, zero-cost, no install.",
+  "scripts": {
+    "vendor": "node scripts/vendor-tesseract.mjs",
+    "predev": "npm run vendor",
+    "dev": "vite",
+    "prebuild": "npm run vendor",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "icons": "node scripts/gen-icons.mjs"
+  },
+  "dependencies": {
+    "exceljs": "^4.4.0",
+    "idb": "^8.0.3",
+    "pdfjs-dist": "^4.10.38",
+    "tesseract.js": "^5.1.1"
+  },
+  "devDependencies": {
+    "playwright": "^1.61.0",
+    "sharp": "^0.33.5",
+    "tsx": "^4.22.4",
+    "typescript": "^5.9.3",
+    "vite": "^5.4.21",
+    "vite-plugin-pwa": "^0.20.5"
+  }
+}
