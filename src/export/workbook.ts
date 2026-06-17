@@ -3,6 +3,7 @@ import type { Batch, Receipt, Category } from "../types.ts";
 import { CATEGORIES, CATEGORY_META } from "../config/categories.ts";
 import { excelMoneyFormat, safeAmount } from "../util/money.ts";
 import { formatDate } from "../util/format.ts";
+import { computeInsights, type Insights } from "./insights.ts";
 import { thumbnail } from "./images.ts";
 
 // The output is the point (§3). A themed, multi-sheet workbook: a Summary the
@@ -67,8 +68,10 @@ export async function buildWorkbook(
 
   const totalCost = rows.reduce((s, r) => s + (r.cost || 0), 0);
   const currency = dominantCurrency(rows);
+  const insights = computeInsights(rows);
 
-  buildSummarySheet(wb, batch, rows, totalCost, currency);
+  buildSummarySheet(wb, batch, rows, totalCost, currency, insights);
+  buildInsightsSheet(wb, insights, currency);
   buildReceiptsSheet(wb, "All Receipts", rows, imageByReceipt, true);
 
   for (const cat of CATEGORIES) {
@@ -97,6 +100,7 @@ function buildSummarySheet(
   rows: Receipt[],
   totalCost: number,
   currency: string,
+  insights: Insights,
 ): void {
   const ws = wb.addWorksheet("Summary", {
     properties: { tabColor: { argb: TEAL } },
@@ -134,6 +138,7 @@ function buildSummarySheet(
     ["Job name", batch.jobName || "—"],
     ["Job number", batch.jobNumber || "—"],
     ["Generated", formatDate(toLocalIso(new Date()))],
+    ["Expense period", insights.period || "—"],
     ["Receipts", String(rows.length)],
     [
       "Flagged for review",
@@ -228,6 +233,116 @@ function buildSummarySheet(
     totalCost === 0 ? "Processed free, on your device." : "";
   ws.getCell(`D${r}`).font = { italic: true, color: { argb: SLATE }, size: 10 };
   ws.mergeCells(`D${r}:E${r}`);
+}
+
+// ---- Insights sheet -------------------------------------------------------
+
+function buildInsightsSheet(
+  wb: ExcelJS.Workbook,
+  insights: Insights,
+  currency: string,
+): void {
+  const ws = wb.addWorksheet("Insights", {
+    properties: { tabColor: { argb: INK } },
+    views: [{ showGridLines: false }],
+  });
+  ws.getColumn(1).width = 3;
+  ws.getColumn(2).width = 26;
+  ws.getColumn(3).width = 14;
+  ws.getColumn(4).width = 16;
+  ws.getColumn(5).width = 16;
+
+  // Title band
+  ws.mergeCells("B2:E2");
+  const title = ws.getCell("B2");
+  title.value = "Insights";
+  title.font = { size: 20, bold: true, color: { argb: "FFFFFFFF" } };
+  title.alignment = { vertical: "middle" };
+  for (const ref of ["B2", "C2", "D2", "E2"]) {
+    ws.getCell(ref).fill = { type: "pattern", pattern: "solid", fgColor: { argb: INK } };
+  }
+  ws.getRow(2).height = 28;
+
+  const fmt = excelMoneyFormat(currency);
+
+  // Headline KPIs
+  let r = 4;
+  const kpis: [string, number | string, string?][] = [
+    ["Receipts", insights.count],
+    ["Total", insights.total, fmt],
+    ["Tax", insights.tax, fmt],
+    ["Average per receipt", insights.average, fmt],
+    ["Largest expense", insights.largest, fmt],
+    ["Flagged for review", insights.flagged],
+    ["Expense period", insights.period || "—"],
+  ];
+  for (const [k, v, numFmt] of kpis) {
+    ws.getCell(`B${r}`).value = k;
+    ws.getCell(`B${r}`).font = { color: { argb: SLATE }, size: 10 };
+    const cell = ws.getCell(`C${r}`);
+    cell.value = v;
+    cell.font = { bold: true, color: { argb: INK } };
+    if (numFmt) cell.numFmt = numFmt;
+    r++;
+  }
+
+  // Top vendors + daily totals tables
+  r += 1;
+  r = insightsTable(
+    ws, r, "Top vendors", ["Vendor", "Count", "Amount"],
+    insights.topVendors.map((v) => [v.vendor, v.count, v.total]), fmt,
+  );
+  r += 1;
+  insightsTable(
+    ws, r, "Daily totals", ["Date", "Count", "Amount"],
+    insights.timeline.map((t) => [formatDate(t.date), t.count, t.total]), fmt,
+  );
+}
+
+/** Write a small zebra-striped table (heading + header + rows); the last column
+ *  is money-formatted. Returns the next free row. */
+function insightsTable(
+  ws: ExcelJS.Worksheet,
+  startRow: number,
+  heading: string,
+  headers: string[],
+  data: (string | number)[][],
+  moneyFmt: string,
+): number {
+  let r = startRow;
+  ws.mergeCells(`B${r}:E${r}`);
+  const h = ws.getCell(`B${r}`);
+  h.value = heading;
+  h.font = { bold: true, size: 12, color: { argb: INK } };
+  r++;
+  headers.forEach((header, i) => {
+    const cell = ws.getCell(r, 2 + i);
+    cell.value = header;
+    cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: INK } };
+    cell.alignment = { horizontal: i === 0 ? "left" : "right" };
+  });
+  r++;
+  if (data.length === 0) {
+    ws.getCell(`B${r}`).value = "—";
+    ws.getCell(`B${r}`).font = { italic: true, color: { argb: SLATE }, size: 10 };
+    return r + 1;
+  }
+  data.forEach((row, idx) => {
+    row.forEach((v, i) => {
+      const cell = ws.getCell(r, 2 + i);
+      cell.value = v;
+      cell.alignment = { horizontal: i === 0 ? "left" : "right" };
+      if (i === row.length - 1 && typeof v === "number") cell.numFmt = moneyFmt;
+    });
+    if (idx % 2 === 1) {
+      for (let c = 2; c <= 1 + row.length; c++) {
+        ws.getCell(r, c).fill = { type: "pattern", pattern: "solid", fgColor: { argb: STRIPE } };
+      }
+    }
+    r++;
+  });
+  return r;
 }
 
 // ---- Receipts sheet (All + per-category) ---------------------------------

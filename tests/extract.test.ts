@@ -93,3 +93,17 @@ test("unlabeled receipt falls back to largest amount", () => {
   // low confidence because there was no labeled total
   assert.ok(r.amount.confidence <= 0.6);
 });
+
+test("ignores savings/cash/change lines when picking the total", () => {
+  const r = parseReceipt(
+    ocr(["Mega Mart", "TOTAL SAVINGS 5.00", "TOTAL 42.00", "CASH 50.00", "CHANGE 8.00"]),
+  );
+  assert.equal(r.amount.value, 42);
+  // cash tendered (50) is larger than the total but must not trip reconcile
+  assert.ok(!r.flags.some((f) => f.code === "total_mismatch"));
+});
+
+test("typo'd month name still parses (jaunary)", () => {
+  const r = parseReceipt(ocr(["Vendor", "Jaunary 5, 2026", "Total 5.00"]));
+  assert.equal(r.date.value, "2026-01-05");
+});

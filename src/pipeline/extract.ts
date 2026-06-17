@@ -9,6 +9,7 @@ import type {
 import { parseAmount, detectCurrency } from "../util/money.ts";
 import { monthFromName, toIso, fromIso, daysBetween } from "../util/format.ts";
 import { categorize } from "../config/categories.ts";
+import { matchVendor, wordBoundaryMatcher } from "../config/vendors.ts";
 import { CONFIDENCE, FLAGS, CURRENCY_DEFAULT } from "../config/constants.ts";
 
 // Extract structured fields from OCR text with rules/heuristics (§5 step 3).
@@ -93,6 +94,16 @@ const TOTAL_LABELS = [
   { re: /\btotal\b/i, weight: 0.85 },
 ];
 const SUBTOTAL_RE = /\bsub[\s-]?total\b/i;
+// A generic "total" line that is really something else — subtotal/tax/tender/
+// change/savings/discount/points/item-count — is not the grand total. Adapted
+// from the original app's _NON_GRAND_LINE_RE so these never win the amount.
+const NON_GRAND_RE =
+  /\b(sub[\s-]?total|tax|savings|discount|tender(?:ed)?|tend|cash|change|points|rewards?|items?|qty|quantity|count)\b/i;
+// Payment/tender lines whose money value can exceed the total (cash given, card
+// charged). Excluded when finding the largest plausible amount so they don't
+// masquerade as the grand total or trip the reconcile "larger amount" check.
+const PAYMENT_RE =
+  /\b(cash|change|tender(?:ed)?|tend|card|visa|master\s*card|mastercard|amex|american\s*express|debit|credit|approval|auth|points|rewards?)\b/i;
 const TAX_RE = /\b(sales\s*tax|tax|vat|gst|hst|tps|tvq)\b/i;
 const DATE_LABEL_RE = /\b(date|invoice\s*date|order\s*date|transaction\s*date)\b/i;
 
@@ -109,9 +120,12 @@ function findAmount(lines: OcrLine[]): {
     const line = lines[i]!;
     const text = line.text;
 
-    // Track the largest money value anywhere (used for reconciliation).
-    for (const h of moneyHitsFromLine(line)) {
-      if (!allMax || h.value > allMax.value) allMax = h;
+    // Track the largest money value anywhere (used for reconciliation), but
+    // skip payment/tender lines whose value can exceed the actual total.
+    if (!PAYMENT_RE.test(text)) {
+      for (const h of moneyHitsFromLine(line)) {
+        if (!allMax || h.value > allMax.value) allMax = h;
+      }
     }
 
     if (SUBTOTAL_RE.test(text)) {
@@ -121,18 +135,20 @@ function findAmount(lines: OcrLine[]): {
     }
 
     for (const label of TOTAL_LABELS) {
-      if (label.re.test(text)) {
-        // Amount may be on the same line or the next (label-only line).
-        let hit = rightmostAmount(line, true);
-        if (!hit && lines[i + 1]) hit = rightmostAmount(lines[i + 1]!, true);
-        if (hit && hit.value > 0) {
-          const conf = label.weight * (line.confidence / 100 || 0.7);
-          if (!best || label.weight > best.weight) {
-            best = { hit, weight: label.weight, conf };
-          }
+      if (!label.re.test(text)) continue;
+      // A generic "total" line that is really subtotal/tax/tender/change/savings/
+      // discount/points/item-count is not the grand total — skip it.
+      if (label.weight < 1 && NON_GRAND_RE.test(text)) break;
+      // Amount may be on the same line or the next (label-only line).
+      let hit = rightmostAmount(line, true);
+      if (!hit && lines[i + 1]) hit = rightmostAmount(lines[i + 1]!, true);
+      if (hit && hit.value > 0) {
+        const conf = label.weight * (line.confidence / 100 || 0.7);
+        if (!best || label.weight > best.weight) {
+          best = { hit, weight: label.weight, conf };
         }
-        break;
       }
+      break;
     }
   }
 
@@ -278,6 +294,10 @@ function findDate(lines: OcrLine[]): Field<string> | null {
 const ADDRESS_RE =
   /\b(street|st\.?|ave|avenue|road|rd\.?|blvd|suite|ste|floor|fl\.?|drive|dr\.?|lane|ln\.?|way|hwy|p\.?o\.?\s*box)\b/i;
 const PHONE_RE = /(\+?\d[\d\s().-]{6,}\d)/;
+// "Springfield, IL 62704" — a US state abbreviation followed by a ZIP code.
+const STATE_ZIP_RE = /\b[A-Z]{2}\s+\d{5}(?:-\d{4})?\b/;
+// "123 Main St", "1700 W 7th Ave" — a leading street number plus a street word.
+const STREET_NUMBER_RE = /^\s*\d{1,6}\s+\w/;
 
 function looksLikeVendorLine(line: OcrLine): boolean {
   const t = line.text.trim();
@@ -288,9 +308,21 @@ function looksLikeVendorLine(line: OcrLine): boolean {
   if (MONEY_RE.test(t) && letters < 6) return false;
   if (DATE_LABEL_RE.test(t)) return false;
   if (PHONE_RE.test(t) && letters < 6) return false;
+  if (STATE_ZIP_RE.test(t)) return false; // "..., IL 62704"
+  if (STREET_NUMBER_RE.test(t) && ADDRESS_RE.test(t)) return false; // "123 Main St"
   if (ADDRESS_RE.test(t)) return false;
   if (/^(receipt|invoice|order|tel|phone|fax|www\.|http)/i.test(t)) return false;
   return true;
+}
+
+/** Find the bbox of the first line containing a known-vendor alias, so the
+ *  review UI can still draw an on-image marker for a brand-matched vendor. */
+function lineBBoxForAlias(lines: OcrLine[], alias: string): BBox | undefined {
+  const re = wordBoundaryMatcher(alias);
+  for (const line of lines) {
+    if (re.test(line.text.toLowerCase())) return line.bbox;
+  }
+  return undefined;
 }
 
 function findVendor(lines: OcrLine[]): Field<string> | null {
@@ -425,10 +457,22 @@ export function parseReceipt(
   const { amount, subtotal, allMax } = findAmount(lines);
   const tax = findTax(lines);
   const date = findDate(lines);
-  const vendor = findVendor(lines);
   const currency = detectCurrency(ocr.text, opts.currencyDefault ?? CURRENCY_DEFAULT);
 
-  const cat = categorize(vendor?.value ?? "", lines.slice(0, 4).map((l) => l.text).join(" "));
+  // Vendor: prefer a recognized brand (names the merchant, not the store address —
+  // the lesson ported from the original app's vendor DB). Fall back to the
+  // address-skipping line heuristic when no known brand is present.
+  const known = matchVendor(ocr.text);
+  let vendor = findVendor(lines);
+  if (known) {
+    const field: Field<string> = { value: known.name, confidence: 0.92 };
+    const bbox = lineBBoxForAlias(lines, known.alias);
+    if (bbox) field.bbox = bbox;
+    vendor = field;
+  }
+
+  const hintText = lines.slice(0, 4).map((l) => l.text).join(" ");
+  const cat = categorize(vendor?.value ?? "", hintText, known);
   const category: Field<Category> = {
     value: cat.category,
     confidence: cat.matched ? 0.85 : 0.4,

@@ -16,6 +16,11 @@ export function renderHeader(app: App): HTMLElement {
       ),
       el(
         "button",
+        { class: "btn btn-ghost", onclick: () => app.exportCsv() },
+        ["⬇ ", span("CSV")],
+      ),
+      el(
+        "button",
         { class: "btn btn-primary", onclick: () => void app.generate() },
         ["⬇ ", span("Generate")],
       ),

@@ -64,9 +64,22 @@ test("buildWorkbook produces a valid multi-sheet workbook with footing totals", 
   await wb.xlsx.load(await result.blob.arrayBuffer());
   const names = wb.worksheets.map((w) => w.name);
   assert.ok(names.includes("Summary"));
+  assert.ok(names.includes("Insights"));
   assert.ok(names.includes("All Receipts"));
   assert.ok(names.includes("Travel"));
   assert.ok(names.includes("Lodging"));
+
+  // Insights sheet surfaces the headline total.
+  const insightsWs = wb.getWorksheet("Insights")!;
+  const sumAmounts = receipts.reduce((s, r) => s + r.amount.value, 0);
+  let foundInsightsTotal = false;
+  insightsWs.eachRow((row) => {
+    if (String(row.getCell(2).value ?? "") === "Total") {
+      assert.ok(Math.abs(Number(row.getCell(3).value) - sumAmounts) < 0.001);
+      foundInsightsTotal = true;
+    }
+  });
+  assert.ok(foundInsightsTotal, "insights has a total KPI");
 
   // Summary grand total formula footing should equal the sum of amounts.
   const expectedTotal = receipts.reduce((s, r) => s + r.amount.value, 0);

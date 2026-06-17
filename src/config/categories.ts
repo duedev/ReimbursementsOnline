@@ -1,9 +1,15 @@
 import type { Category } from "../types.ts";
+import { matchVendor, wordBoundaryMatcher, type VendorMatch } from "./vendors.ts";
 
-// Curated vendor → category lookup (§5 step 3). Deterministic and free.
-// Matching is substring/keyword based against the OCR'd vendor + top lines.
-// This is intentionally a plain table so it is trivial to extend per-deployment
-// without touching code paths.
+// Category taxonomy + classification (§5 step 3). Deterministic and free.
+//
+// Classification is two-tiered:
+//   1. Known-vendor match (vendors.ts) — a recognized brand both *names* the
+//      vendor and gives its category in one pass.
+//   2. Generic, non-brand keyword rules (below) — for merchants not in the brand
+//      DB. Matching is **word-bounded** (adapted from the original app's
+//      `_kw_pattern`) so short tokens like "inn" or "ink" can't fire inside
+//      "dinner"/"drink", which the previous padded-substring approach risked.
 
 export const CATEGORIES: Category[] = [
   "Meals & Entertainment",
@@ -37,249 +43,85 @@ export const CATEGORY_META: Record<Category, { color: string; emoji: string }> =
 
 interface Rule {
   category: Category;
-  /** Lowercase keywords; any hit assigns the category. Ordered by specificity. */
+  /** Lowercase generic descriptors (NOT brand names — those live in vendors.ts). */
   keywords: string[];
 }
 
-// Order matters: earlier rules win on ties. Specific brands before generics.
+// Order matters: earlier rules win on ties.
 const RULES: Rule[] = [
   {
     category: "Lodging",
-    keywords: [
-      "marriott",
-      "hilton",
-      "hyatt",
-      "sheraton",
-      "westin",
-      "holiday inn",
-      "hampton inn",
-      "courtyard",
-      "ramada",
-      "motel",
-      "hotel",
-      "inn ",
-      "airbnb",
-      "lodge",
-      "resort",
-      "hostel",
-    ],
+    keywords: ["hotel", "motel", "inn", "lodge", "resort", "hostel", "suites", "bed and breakfast"],
   },
   {
     category: "Ground Transportation",
     keywords: [
-      "uber",
-      "lyft",
-      "taxi",
-      "cab",
-      "metro",
-      "transit",
-      "parking",
-      "park ",
-      "garage",
-      "toll",
-      "hertz",
-      "avis",
-      "enterprise rent",
-      "budget rent",
-      "zipcar",
-      "amtrak",
-      "rail",
-      "bart",
-      "subway fare",
+      "taxi", "cab", "rideshare", "parking", "garage", "toll", "transit",
+      "subway fare", "car rental", "rental car", "light rail",
     ],
   },
   {
     category: "Fuel",
-    keywords: [
-      "shell",
-      "chevron",
-      "exxon",
-      "mobil",
-      "bp ",
-      "texaco",
-      "valero",
-      "arco",
-      "76 ",
-      "sunoco",
-      "citgo",
-      "gas station",
-      "fuel",
-      "petrol",
-      "gasoline",
-    ],
+    keywords: ["gas station", "gasoline", "unleaded", "diesel", "petrol", "fuel", "per gallon", "price/gal"],
   },
   {
     category: "Travel",
-    keywords: [
-      "airlines",
-      "airline",
-      "airways",
-      "delta",
-      "united",
-      "american air",
-      "southwest",
-      "jetblue",
-      "alaska air",
-      "frontier",
-      "spirit air",
-      "expedia",
-      "booking.com",
-      "kayak",
-      "priceline",
-      "airport",
-      "baggage",
-      "boarding",
-    ],
+    keywords: ["airline", "airlines", "airways", "airport", "boarding pass", "baggage", "flight"],
   },
   {
     category: "Meals & Entertainment",
     keywords: [
-      "restaurant",
-      "cafe",
-      "café",
-      "coffee",
-      "starbucks",
-      "dunkin",
-      "mcdonald",
-      "burger",
-      "pizza",
-      "grill",
-      "kitchen",
-      "bar ",
-      "tavern",
-      "diner",
-      "bakery",
-      "deli",
-      "bistro",
-      "steakhouse",
-      "sushi",
-      "taco",
-      "chipotle",
-      "panera",
-      "subway sandwich",
-      "doordash",
-      "grubhub",
-      "ubereats",
-      "uber eats",
-      "catering",
-      "brewing",
-      "winery",
+      "restaurant", "cafe", "café", "coffee", "bakery", "deli", "bistro", "diner",
+      "grill", "kitchen", "tavern", "brewery", "brewing", "winery", "catering",
+      "steakhouse", "sushi", "pizza", "burger", "pub",
     ],
   },
   {
     category: "Software & Subscriptions",
-    keywords: [
-      "google",
-      "microsoft",
-      "adobe",
-      "github",
-      "atlassian",
-      "slack",
-      "zoom",
-      "dropbox",
-      "notion",
-      "figma",
-      "openai",
-      "anthropic",
-      "aws",
-      "amazon web services",
-      "digitalocean",
-      "heroku",
-      "netlify",
-      "vercel",
-      "subscription",
-      "saas",
-      "license",
-      "domain",
-      "hosting",
-    ],
+    keywords: ["subscription", "saas", "license", "domain", "hosting", "web services", "cloud"],
   },
   {
     category: "Utilities & Phone",
-    keywords: [
-      "at&t",
-      "verizon",
-      "t-mobile",
-      "comcast",
-      "xfinity",
-      "spectrum",
-      "cox communications",
-      "electric",
-      "water bill",
-      "internet",
-      "wireless",
-      "phone bill",
-      "utility",
-    ],
+    keywords: ["electric", "water bill", "internet", "wireless", "phone bill", "utility", "broadband", "cable"],
   },
   {
     category: "Shipping & Postage",
-    keywords: [
-      "fedex",
-      "ups store",
-      " ups ",
-      "usps",
-      "dhl",
-      "postage",
-      "shipping",
-      "courier",
-      "post office",
-    ],
+    keywords: ["postage", "shipping", "courier", "post office", "freight", "parcel"],
   },
   {
     category: "Office Supplies",
-    keywords: [
-      "staples",
-      "office depot",
-      "officemax",
-      "best buy",
-      "amazon",
-      "walmart",
-      "target",
-      "costco",
-      "home depot",
-      "lowe's",
-      "lowes",
-      "supplies",
-      "stationery",
-      "printer",
-      "ink ",
-      "toner",
-    ],
+    keywords: ["stationery", "printer", "ink", "toner", "supplies", "hardware", "lumber", "building supply"],
   },
   {
     category: "Professional Services",
-    keywords: [
-      "consulting",
-      "legal",
-      "attorney",
-      "accounting",
-      "notary",
-      "agency",
-      "services llc",
-      "associates",
-      "law office",
-      "clinic",
-    ],
+    keywords: ["consulting", "legal", "attorney", "accounting", "notary", "law office", "clinic", "agency", "associates"],
   },
 ];
+
+// Precompile word-boundary matchers for every keyword, once.
+const RULE_PATTERNS: { category: Category; res: RegExp[] }[] = RULES.map((r) => ({
+  category: r.category,
+  res: r.keywords.map(wordBoundaryMatcher),
+}));
 
 /**
  * Classify a vendor/receipt text into a category. Deterministic, free.
  * @param vendor the extracted vendor name (may be empty)
  * @param hintText additional text (e.g. first OCR lines) to widen the net
+ * @param known an already-computed known-vendor match; pass `null` to force the
+ *   keyword path, or omit to let this function run the brand lookup itself.
  * @returns the best category and whether it was confidently matched
  */
 export function categorize(
   vendor: string,
   hintText = "",
+  known: VendorMatch | null = matchVendor(`${vendor} ${hintText}`),
 ): { category: Category; matched: boolean } {
-  const hay = ` ${(vendor + " " + hintText).toLowerCase()} `;
-  for (const rule of RULES) {
-    for (const kw of rule.keywords) {
-      if (hay.includes(kw)) {
-        return { category: rule.category, matched: true };
-      }
+  if (known) return { category: known.category, matched: true };
+  const hay = `${vendor} ${hintText}`.toLowerCase();
+  for (const rule of RULE_PATTERNS) {
+    for (const re of rule.res) {
+      if (re.test(hay)) return { category: rule.category, matched: true };
     }
   }
   return { category: "Other", matched: false };
