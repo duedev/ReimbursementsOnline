@@ -2,6 +2,7 @@ import { repo } from "../store/repo.ts";
 import { cleanImage } from "./imagePrep.ts";
 import { hashBlob } from "./hash.ts";
 import { parseReceipt } from "./extract.ts";
+import { findSemanticDuplicate, type DupRecord } from "./dedup.ts";
 import { getOcrEngine, type OcrEngine } from "./ocr.ts";
 import { CONFIDENCE } from "../config/constants.ts";
 import type { Receipt, Flag, OcrResult } from "../types.ts";
@@ -56,21 +57,54 @@ export async function processReceipt(
     // 4. Rules extraction.
     const ex = parseReceipt(ocr, { currencyDefault: receipt.currency });
 
-    // 5. Duplicate detection within the same batch.
+    // 5. Duplicate detection within the same batch. First an exact image-hash
+    //    match (byte-identical re-upload); failing that, a semantic match on
+    //    vendor + date + amount (the same receipt photographed twice).
     const flags: Flag[] = [...ex.flags];
+    let duplicateOf: string | null = null;
     const dupInBatch = sameHash.find((r) => r.batchId === receipt.batchId);
     if (dupInBatch) {
+      duplicateOf = dupInBatch.fileName;
       flags.unshift({
         code: "duplicate",
         severity: "warn",
         message: `Looks identical to "${dupInBatch.fileName}".`,
       });
+    } else {
+      const siblings = await repo.listReceipts(receipt.batchId);
+      const others: DupRecord[] = siblings
+        .filter((r) => r.id !== receiptId)
+        .map((r) => ({
+          id: r.id,
+          label: r.fileName,
+          vendor: r.vendor.value,
+          date: r.date.value,
+          amount: r.amount.value,
+        }));
+      const semDup = findSemanticDuplicate(
+        {
+          id: receiptId,
+          label: receipt.fileName,
+          vendor: ex.vendor.value,
+          date: ex.date.value,
+          amount: ex.amount.value,
+        },
+        others,
+      );
+      if (semDup) {
+        duplicateOf = semDup.label;
+        flags.unshift({
+          code: "duplicate",
+          severity: "warn",
+          message: `Same vendor, date and amount as "${semDup.label}" — possible duplicate.`,
+        });
+      }
     }
 
     const hasError = flags.some((f) => f.severity === "error");
     const needsReview =
       hasError ||
-      Boolean(dupInBatch) ||
+      Boolean(duplicateOf) ||
       ex.confidence < CONFIDENCE.reviewBelow ||
       ex.amount.value <= 0;
 

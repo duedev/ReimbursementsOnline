@@ -6,6 +6,14 @@ const MONTHS: Record<string, number> = {
   jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
 };
 
+// Common OCR/spelling typos for full month names (adapted from the original
+// app's MONTH_MAP). Checked before the 3-letter prefix so e.g. "jaunary" still
+// resolves to January.
+const MONTH_TYPOS: Record<string, number> = {
+  jaunary: 1, januray: 1, feburary: 2, febuary: 2, septmber: 9,
+  noveber: 11, novmber: 11, decmber: 12, agust: 8,
+};
+
 export function todayIso(): string {
   return toIso(new Date());
 }
@@ -39,10 +47,11 @@ export function formatDate(iso: string): string {
   });
 }
 
-/** Month index (1-12) from a 3-letter (or longer) month name. */
+/** Month index (1-12) from a 3-letter (or longer) month name, typo-tolerant. */
 export function monthFromName(name: string): number | null {
-  const key = name.slice(0, 3).toLowerCase();
-  return MONTHS[key] ?? null;
+  const full = name.toLowerCase().replace(/\.$/, "");
+  if (MONTH_TYPOS[full]) return MONTH_TYPOS[full];
+  return MONTHS[full.slice(0, 3)] ?? null;
 }
 
 export function daysBetween(a: Date, b: Date): number {

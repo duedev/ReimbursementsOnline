@@ -94,6 +94,16 @@ const TOTAL_LABELS = [
   { re: /\btotal\b/i, weight: 0.85 },
 ];
 const SUBTOTAL_RE = /\bsub[\s-]?total\b/i;
+// A generic "total" line that is really something else — subtotal/tax/tender/
+// change/savings/discount/points/item-count — is not the grand total. Adapted
+// from the original app's _NON_GRAND_LINE_RE so these never win the amount.
+const NON_GRAND_RE =
+  /\b(sub[\s-]?total|tax|savings|discount|tender(?:ed)?|tend|cash|change|points|rewards?|items?|qty|quantity|count)\b/i;
+// Payment/tender lines whose money value can exceed the total (cash given, card
+// charged). Excluded when finding the largest plausible amount so they don't
+// masquerade as the grand total or trip the reconcile "larger amount" check.
+const PAYMENT_RE =
+  /\b(cash|change|tender(?:ed)?|tend|card|visa|master\s*card|mastercard|amex|american\s*express|debit|credit|approval|auth|points|rewards?)\b/i;
 const TAX_RE = /\b(sales\s*tax|tax|vat|gst|hst|tps|tvq)\b/i;
 const DATE_LABEL_RE = /\b(date|invoice\s*date|order\s*date|transaction\s*date)\b/i;
 
@@ -110,9 +120,12 @@ function findAmount(lines: OcrLine[]): {
     const line = lines[i]!;
     const text = line.text;
 
-    // Track the largest money value anywhere (used for reconciliation).
-    for (const h of moneyHitsFromLine(line)) {
-      if (!allMax || h.value > allMax.value) allMax = h;
+    // Track the largest money value anywhere (used for reconciliation), but
+    // skip payment/tender lines whose value can exceed the actual total.
+    if (!PAYMENT_RE.test(text)) {
+      for (const h of moneyHitsFromLine(line)) {
+        if (!allMax || h.value > allMax.value) allMax = h;
+      }
     }
 
     if (SUBTOTAL_RE.test(text)) {
@@ -122,18 +135,20 @@ function findAmount(lines: OcrLine[]): {
     }
 
     for (const label of TOTAL_LABELS) {
-      if (label.re.test(text)) {
-        // Amount may be on the same line or the next (label-only line).
-        let hit = rightmostAmount(line, true);
-        if (!hit && lines[i + 1]) hit = rightmostAmount(lines[i + 1]!, true);
-        if (hit && hit.value > 0) {
-          const conf = label.weight * (line.confidence / 100 || 0.7);
-          if (!best || label.weight > best.weight) {
-            best = { hit, weight: label.weight, conf };
-          }
+      if (!label.re.test(text)) continue;
+      // A generic "total" line that is really subtotal/tax/tender/change/savings/
+      // discount/points/item-count is not the grand total — skip it.
+      if (label.weight < 1 && NON_GRAND_RE.test(text)) break;
+      // Amount may be on the same line or the next (label-only line).
+      let hit = rightmostAmount(line, true);
+      if (!hit && lines[i + 1]) hit = rightmostAmount(lines[i + 1]!, true);
+      if (hit && hit.value > 0) {
+        const conf = label.weight * (line.confidence / 100 || 0.7);
+        if (!best || label.weight > best.weight) {
+          best = { hit, weight: label.weight, conf };
         }
-        break;
       }
+      break;
     }
   }
 

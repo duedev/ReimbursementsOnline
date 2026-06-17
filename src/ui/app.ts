@@ -1,6 +1,7 @@
 import { repo } from "../store/repo.ts";
 import { queue } from "../pipeline/queue.ts";
 import { buildWorkbook } from "../export/workbook.ts";
+import { toCsv, csvFileName } from "../export/csv.ts";
 import { validateFile, safeBasename } from "../util/files.ts";
 import { LIMITS, CURRENCY_DEFAULT } from "../config/constants.ts";
 import { formatMoney } from "../util/money.ts";
@@ -207,6 +208,25 @@ export class App {
       console.error(err);
       toast("Could not build the spreadsheet.", "error");
     }
+  }
+
+  /** Export the batch as a plain CSV (a lightweight companion to the .xlsx). */
+  exportCsv(): void {
+    const batch = this.currentBatch;
+    if (!batch) return;
+    const exportable = this.receipts.filter(
+      (r) => r.status !== "failed" && r.amount.value > 0,
+    );
+    if (exportable.length === 0) {
+      toast("Nothing to export yet — add some receipts.", "warn");
+      return;
+    }
+    // Prepend a UTF-8 BOM so Excel detects the encoding when opening the file.
+    const blob = new Blob(["\uFEFF", toCsv(this.receipts)], {
+      type: "text/csv;charset=utf-8",
+    });
+    downloadBlob(blob, csvFileName(batch));
+    toast(`Exported ${exportable.length} rows to CSV.`, "success");
   }
 }
 
