@@ -231,10 +231,22 @@ a { color: var(--teal-700); }
 .spinner { width: 22px; height: 22px; border: 3px solid var(--slate-300); border-top-color: var(--teal-600); border-radius: 50%; animation: spin 0.8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* ---------- Settings modal ---------- */
+.settings-modal { width: min(560px, 100%); grid-template-rows: auto auto auto; }
+.settings-body { padding: 18px; overflow-y: auto; }
+.settings-body .frow { grid-template-columns: 140px 1fr; }
+.settings-warn { background: var(--amber-50); border: 1px solid var(--amber); border-radius: 12px; padding: 12px 14px; margin-bottom: 16px; font-size: 13px; line-height: 1.45; color: #7c2d12; }
+.settings-warn strong { display: block; margin-bottom: 4px; }
+.settings-note { font-size: 12px; color: var(--slate); margin: -4px 0 14px 140px; line-height: 1.4; }
+.switch { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--slate); cursor: pointer; }
+.switch input { width: auto; }
+
 /* ---------- Responsive ---------- */
 @media (max-width: 720px) {
   .modal-body { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
   .review-image .imgwrap img { max-height: 38vh; }
   .field-row { grid-template-columns: 1fr; }
   .appbar-actions-text { display: none; }
+  .settings-body .frow { grid-template-columns: 1fr; }
+  .settings-note { margin-left: 0; }
 }

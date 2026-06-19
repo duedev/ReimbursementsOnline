@@ -110,6 +110,9 @@ export interface Receipt {
   ocrText?: string;
 
   methodUsed: ExtractionMethod;
+  /** When a paid tier produced the result, which provider/model (for the
+   *  review panel + an honest audit trail). Absent on the free rules path. */
+  methodDetail?: string;
   cost: number; // dollars spent on this receipt (free path = 0)
 
   approved: boolean;

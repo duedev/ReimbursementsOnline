@@ -12,6 +12,7 @@ import { renderHeader } from "./views/header.ts";
 import { renderSetup } from "./views/setup.ts";
 import { renderBoard } from "./views/board.ts";
 import { ReviewModal } from "./views/review.ts";
+import { SettingsModal } from "./views/settings.ts";
 import type { Batch, Receipt } from "../types.ts";
 
 // Top-level controller. Holds the active batch, listens to the repo + queue,
@@ -108,6 +109,11 @@ export class App {
   startNewBatch(): void {
     this.currentBatchId = null;
     this.render();
+  }
+
+  /** Open the settings panel (the optional paid accuracy tier lives here). */
+  openSettings(): void {
+    new SettingsModal().open();
   }
 
   async addFiles(files: FileList | File[]): Promise<void> {

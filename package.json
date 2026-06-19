@@ -6,6 +6,7 @@
   "description": "Turn a pile of receipts into a polished reimbursement spreadsheet — client-side, zero-cost, no install.",
   "scripts": {
     "vendor": "node scripts/vendor-tesseract.mjs",
+    "vendor:paddle": "node scripts/vendor-paddle.mjs",
     "predev": "npm run vendor",
     "dev": "vite",
     "prebuild": "npm run vendor",

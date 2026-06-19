@@ -28,7 +28,7 @@ the user's device… marginal cost literally $0"):
 | Client / capture / review | Installable PWA, mobile camera capture, offline |
 | File store | IndexedDB blob store (originals + cleaned images) |
 | Work list + Worker | In-browser job queue + Tesseract's own Web Worker |
-| Extraction capability | Tesseract.js OCR + deterministic rules, behind one interface |
+| Extraction capability | Tesseract.js OCR + deterministic rules, behind one interface — with [opt-in PaddleOCR and vision-LLM tiers](#optional-accuracy-tiers-opt-in) swappable behind the same seam |
 | Results store (= board + export source) | IndexedDB |
 | Export | ExcelJS themed multi-sheet workbook, built in the browser |
 
@@ -53,8 +53,9 @@ the design's "keep the smart parts swappable" principle.
    hard-won `vendor_db.py` — the lesson being that the naive "first text line"
    heuristic kept grabbing the address instead of the merchant name.
 
-A paid model is **not required** — it's a future accuracy dial behind the same
-`OcrEngine` seam, for low-confidence receipts only.
+A paid model is **not required** — the default path is `$0`, offline, and
+private. Two **opt-in accuracy tiers** sit behind the same `OcrEngine` seam for
+people who want them; see [Optional accuracy tiers](#optional-accuracy-tiers-opt-in).
 
 ### The output (§3 "the output is the point")
 
@@ -97,6 +98,56 @@ npm run preview    # serve the production build locally
 
 There is nothing to host beyond static files, and no runtime cost. Deploy `dist/`
 to any static host's free tier.
+
+## Optional accuracy tiers (opt-in)
+
+The default build reads every receipt on-device with Tesseract for `$0` and ships
+nothing off your device. Both tiers below are **off by default** and drop in
+behind the existing `OcrEngine` seam — nothing downstream (rules, dedup, review,
+export) changes.
+
+### Tier 1 — PaddleOCR on-device (still `$0`, offline, private)
+
+A stronger on-device OCR engine: **PaddleOCR PP-OCRv5** (separate detection +
+recognition models) running in the browser via **onnxruntime-web** (WebGPU when
+available, WASM otherwise). It's materially better than Tesseract on *photographed*
+receipts — skew, curl, low contrast, thermal-print fade — while keeping every
+guarantee of the default path. It returns the same text + word boxes + confidence,
+so field extraction and the on-image markers work unchanged.
+
+```bash
+npm install onnxruntime-web      # one-time; not bundled by default
+npm run vendor:paddle            # vendors the runtime + PP-OCRv5 models into public/vendor/paddle
+VITE_OCR_ENGINE=paddle npm run dev      # or: VITE_OCR_ENGINE=paddle npm run build
+```
+
+The runtime and the (~few-MB mobile) models are served same-origin and cached by
+the service worker, so it stays offline-capable after first load. Model URLs are
+overridable (`PADDLE_DET_URL` / `PADDLE_REC_URL` / `PADDLE_DICT_URL`) or you can
+drop `det.onnx` / `rec.onnx` / `dict.txt` into `public/vendor/paddle/models`
+yourself.
+
+### Tier 2 — Vision-LLM fallback (paid/free APIs; **leaves your device**)
+
+A confidence-triggered second opinion: for the receipts the on-device pass is
+*unsure* about, a vision model re-reads the cleaned image and returns
+`{vendor, date, amount, tax, currency, category}` in one shot — collapsing OCR +
+rules + categorization. ⚠️ **This sends those receipt images to a third-party API**,
+a deliberate departure from the default "nothing leaves your device" promise — so
+it's off until you turn it on in **⚙ Settings**, needs **your own API key**
+(this app has no server), and is capped by a spend limit. Configure it under
+Settings → *paid accuracy tier*:
+
+| Provider | Default model | Cost | Notes |
+|---|---|---|---|
+| **OpenRouter** | `qwen/qwen2.5-vl-72b-instruct:free` | **Free** (`:free` models, rate-limited) | One OpenAI-compatible key; the same key also reaches paid Claude/Gemini. |
+| **Google Gemini** | `gemini-2.5-flash` | **Free tier** (no card) | Native vision + structured output. |
+| **Anthropic (Claude)** | `claude-haiku-4-5` | ~a fraction of a cent / receipt | Highest accuracy on hard/degraded receipts. |
+
+Only low-confidence receipts trigger a call; each receipt records the method and
+cost, so the workbook's **"Extraction cost"** line stays honest (`$0.00` until a
+paid call actually happens). To keep the key off the device entirely, point
+**Proxy URL** at a thin proxy that injects it server-side.
 
 ### Tests
 
