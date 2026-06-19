@@ -32,9 +32,16 @@ export function renderHeader(app: App): HTMLElement {
     document.createTextNode(APP_NAME),
   ]);
 
+  const settingsBtn = el(
+    "button",
+    { class: "btn btn-ghost", title: "Settings", onclick: () => app.openSettings() },
+    ["⚙ ", span("Settings")],
+  );
+
   const top = el("div", { class: "appbar-row" }, [
     brand,
     el("div", { class: "appbar-spacer" }),
+    settingsBtn,
     ...actions,
   ]);
 

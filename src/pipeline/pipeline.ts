@@ -1,11 +1,12 @@
 import { repo } from "../store/repo.ts";
 import { cleanImage } from "./imagePrep.ts";
 import { hashBlob } from "./hash.ts";
-import { parseReceipt } from "./extract.ts";
+import { parseReceipt, type Extraction } from "./extract.ts";
 import { findSemanticDuplicate, type DupRecord } from "./dedup.ts";
 import { getOcrEngine, type OcrEngine } from "./ocr.ts";
+import { runVisionAssist } from "./vision/index.ts";
 import { CONFIDENCE } from "../config/constants.ts";
-import type { Receipt, Flag, OcrResult } from "../types.ts";
+import type { Receipt, Flag, OcrResult, ExtractionMethod } from "../types.ts";
 
 // The worker's job, end to end (§8 "Process"): clean → hash (cache/dedup) →
 // OCR (skipped on a cache hit) → rules → dedup → decide status. Free path first,
@@ -54,8 +55,27 @@ export async function processReceipt(
       ocr = await engine.recognize(cleaned.blob, cleaned.width, cleaned.height);
     }
 
-    // 4. Rules extraction.
-    const ex = parseReceipt(ocr, { currencyDefault: receipt.currency });
+    // 4. Rules extraction (free, deterministic, on-device).
+    let ex: Extraction = parseReceipt(ocr, { currencyDefault: receipt.currency });
+    let methodUsed: ExtractionMethod = "rules";
+    let methodDetail: string | undefined;
+    let cost = 0;
+    let ocrTextOut = ocr.text;
+
+    // 4b. Optional paid accuracy dial (§5/§9): for a low-confidence receipt, and
+    //     only when the user has opted in + supplied a key, get a vision-model
+    //     second opinion. It returns the same Extraction shape, so everything
+    //     below is identical. Any failure silently keeps the free result.
+    const assist = await runVisionAssist(cleaned.blob, ex, {
+      currencyDefault: receipt.currency,
+    });
+    if (assist) {
+      ex = assist.extraction;
+      methodUsed = "paid";
+      methodDetail = `${assist.provider} · ${assist.model}`;
+      cost = assist.costUsd;
+      if (assist.rawText) ocrTextOut = assist.rawText;
+    }
 
     // 5. Duplicate detection within the same batch. First an exact image-hash
     //    match (byte-identical re-upload); failing that, a semantic match on
@@ -121,9 +141,10 @@ export async function processReceipt(
       category: ex.category,
       confidence: ex.confidence,
       flags,
-      ocrText: ocr.text,
-      methodUsed: "rules",
-      cost: 0,
+      ocrText: ocrTextOut,
+      methodUsed,
+      methodDetail,
+      cost,
       reviewRequired: needsReview,
       status: needsReview ? "needs_review" : "done",
       error: undefined,

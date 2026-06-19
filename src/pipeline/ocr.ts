@@ -127,10 +127,37 @@ function clamp01(n: number): number {
   return n < 0 ? 0 : n > 1 ? 1 : n;
 }
 
+/** Defers building (and lazily importing) a heavier engine until first use, so
+ *  its code/runtime never enters the main bundle unless it's actually selected. */
+class DeferredEngine implements OcrEngine {
+  private real: OcrEngine | null = null;
+  constructor(private readonly factory: () => Promise<OcrEngine>) {}
+  private async get(): Promise<OcrEngine> {
+    if (!this.real) this.real = await this.factory();
+    return this.real;
+  }
+  async recognize(image: Blob, width: number, height: number): Promise<OcrResult> {
+    return (await this.get()).recognize(image, width, height);
+  }
+  async dispose(): Promise<void> {
+    if (this.real) await this.real.dispose();
+  }
+}
+
 let singleton: OcrEngine | null = null;
 
-/** The default engine. Swap this factory to change the extraction tier (§5). */
+/** The active engine (§5). Tesseract is the default $0/offline/private path;
+ *  set `VITE_OCR_ENGINE=paddle` to opt into the on-device PaddleOCR upgrade
+ *  (Tier 1) — both implement the same interface, so nothing downstream changes. */
 export function getOcrEngine(): OcrEngine {
-  if (!singleton) singleton = new TesseractEngine();
+  if (singleton) return singleton;
+  if (import.meta.env?.VITE_OCR_ENGINE === "paddle") {
+    singleton = new DeferredEngine(async () => {
+      const { PaddleEngine } = await import("./engines/paddle/index.ts");
+      return new PaddleEngine();
+    });
+  } else {
+    singleton = new TesseractEngine();
+  }
   return singleton;
 }

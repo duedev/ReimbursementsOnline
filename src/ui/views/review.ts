@@ -1,7 +1,7 @@
 import { el, mount } from "../dom.ts";
 import { repo } from "../../store/repo.ts";
 import { CATEGORIES } from "../../config/categories.ts";
-import { parseAmount, safeAmount } from "../../util/money.ts";
+import { parseAmount, safeAmount, formatMoney } from "../../util/money.ts";
 import { isValidIso } from "../../util/format.ts";
 import { toast } from "../toast.ts";
 import type { Receipt, BBox, Category } from "../../types.ts";
@@ -280,7 +280,8 @@ export class ReviewModal {
       field("Category", category),
       flags,
       el("p", { class: "cap", style: "color:var(--slate);font-size:12px;margin-top:8px" }, [
-        `Read on-device · ${Math.round(r.confidence * 100)}% confidence · $0.00`,
+        `${r.methodUsed === "paid" ? `Read by ${r.methodDetail ?? "paid model"}` : "Read on-device"} · ` +
+          `${Math.round(r.confidence * 100)}% confidence · ${formatMoney(r.cost)}`,
       ]),
     ]);
   }
