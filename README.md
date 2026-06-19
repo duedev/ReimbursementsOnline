@@ -134,15 +134,29 @@ A confidence-triggered second opinion: for the receipts the on-device pass is
 `{vendor, date, amount, tax, currency, category}` in one shot — collapsing OCR +
 rules + categorization. ⚠️ **This sends those receipt images to a third-party API**,
 a deliberate departure from the default "nothing leaves your device" promise — so
-it's off until you turn it on in **⚙ Settings**, needs **your own API key**
-(this app has no server), and is capped by a spend limit. Configure it under
-Settings → *paid accuracy tier*:
+it's capped by a spend limit and, by default, **off** until you enable it in
+**⚙ Settings** (this app has no server, so a key you paste there lives only in
+your browser). Configure it under Settings → *paid accuracy tier*:
 
 | Provider | Default model | Cost | Notes |
 |---|---|---|---|
 | **OpenRouter** (default) | `openrouter/free` (Free Models Router) | **Free** (~50 req/day; 1000/day with ≥10 credits) | Auto-picks a quick, reliable free model that supports vision (`provider.sort: throughput`). One OpenAI-compatible key; type a paid Claude/Gemini id to use those instead. |
 | **Google Gemini** | `gemini-2.5-flash` | **Free tier** (no card) | Native vision + structured output. |
 | **Anthropic (Claude)** | `claude-haiku-4-5` | ~a fraction of a cent / receipt | Highest accuracy on hard/degraded receipts. |
+
+**Zero-click free tier (build-time key).** Instead of pasting a key per browser,
+you can bake an OpenRouter free key into *your* deployment's bundle — it's
+injected at build time and **never committed to source** (`dist/` is gitignored):
+
+```bash
+OPENROUTER_API_KEY=sk-or-… npm run build   # or VITE_OPENROUTER_FREE_KEY=…
+```
+
+With a key baked in, the first run **auto-enables the OpenRouter free router** —
+no settings trip needed. ⚠️ This means low-confidence receipts are sent to the
+free router by default on that build; **omit the variable to keep everything
+on-device.** A user's own key (Settings) always overrides the built-in one, and
+the built-in key is only ever used for the *free* router (never paid models).
 
 Only low-confidence receipts trigger a call; each receipt records the method and
 cost, so the workbook's **"Extraction cost"** line stays honest (`$0.00` until a

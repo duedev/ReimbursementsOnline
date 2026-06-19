@@ -1,9 +1,27 @@
 import type { ProviderId } from "./types.ts";
+import { usesFreeRouting } from "./providers/openrouter.ts";
 
-// Tier 3 configuration. Because this app has no server, the only way to keep a
-// vision call "$0-infrastructure" is a user-supplied key, stored locally. It is
-// OFF by default and never bundled. A self-hosted proxy can be pointed at via
-// `baseUrl` so the key need not live in the browser at all.
+// A built-in OpenRouter key for the FREE Models Router, injected at BUILD time
+// (never committed to source). Vite replaces `__OPENROUTER_FREE_KEY__` with the
+// value of OPENROUTER_API_KEY / VITE_OPENROUTER_FREE_KEY from the build env (see
+// vite.config.ts); it is "" when the build provides no key. The `typeof` guard
+// keeps this safe in non-Vite contexts (the Node test runner), where the global
+// is undefined. A user's own key (Settings) always wins, and this fallback is
+// only ever used for OpenRouter free routing — never paid models.
+declare const __OPENROUTER_FREE_KEY__: string;
+const BUILTIN_OPENROUTER_KEY: string =
+  typeof __OPENROUTER_FREE_KEY__ === "string" ? __OPENROUTER_FREE_KEY__ : "";
+
+/** Whether a built-in OpenRouter free key was baked in at build time. */
+export function hasBuiltInOpenRouterKey(): boolean {
+  return BUILTIN_OPENROUTER_KEY.length > 0;
+}
+
+// Tier 3 configuration. Because this app has no server, a vision call uses either
+// a user-supplied key (stored locally) or the build-time free key above. The
+// tier is OFF by default UNLESS a build-time key is present, in which case the
+// first run auto-enables the OpenRouter free router (zero-click). A self-hosted
+// proxy can be pointed at via `baseUrl` so a key need not live in the browser.
 
 export interface VisionConfig {
   enabled: boolean;
@@ -69,7 +87,10 @@ export const PROVIDERS: Record<ProviderId, ProviderMeta> = {
 const STORAGE_KEY = "ro.vision.config.v1";
 
 const DEFAULTS: VisionConfig = {
-  enabled: false,
+  // Zero-click: a build that bakes in a free key opts into the tier by default
+  // (low-confidence receipts use the OpenRouter free router). A keyless build
+  // stays off, preserving the on-device-only promise until a user turns it on.
+  enabled: hasBuiltInOpenRouterKey(),
   provider: "openrouter",
   model: PROVIDERS.openrouter.defaultModel,
   apiKey: "",
@@ -100,6 +121,19 @@ export function saveVisionConfig(patch: Partial<VisionConfig>): VisionConfig {
     }
   }
   return next;
+}
+
+/** The key to actually send: the user's own key wins; otherwise the built-in
+ *  free key, but only for OpenRouter's free routing (never for paid models).
+ *  `builtIn` is injectable for tests; production uses the build-time value. */
+export function effectiveApiKey(
+  cfg: VisionConfig,
+  builtIn: string = BUILTIN_OPENROUTER_KEY,
+): string {
+  const own = cfg.apiKey.trim();
+  if (own) return own;
+  if (cfg.provider === "openrouter" && usesFreeRouting(cfg.model)) return builtIn;
+  return "";
 }
 
 export function withinBudget(cfg: VisionConfig = getVisionConfig(), projected = 0): boolean {

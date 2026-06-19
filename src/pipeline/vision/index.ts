@@ -4,6 +4,7 @@ import {
   getVisionConfig,
   withinBudget,
   recordSpend,
+  effectiveApiKey,
   type VisionConfig,
 } from "./config.ts";
 import { visionToExtraction } from "./schema.ts";
@@ -16,7 +17,7 @@ import { createAnthropicProvider } from "./providers/anthropic.ts";
 // to the rules result on any failure so a paid call can only ever *help*.
 
 export function getVisionProvider(cfg: VisionConfig): VisionProvider {
-  const init = { apiKey: cfg.apiKey, model: cfg.model, baseUrl: cfg.baseUrl || undefined };
+  const init = { apiKey: effectiveApiKey(cfg), model: cfg.model, baseUrl: cfg.baseUrl || undefined };
   switch (cfg.provider) {
     case "gemini":
       return createGeminiProvider(init);
@@ -29,7 +30,7 @@ export function getVisionProvider(cfg: VisionConfig): VisionProvider {
 }
 
 export function visionConfigured(cfg: VisionConfig = getVisionConfig()): boolean {
-  return cfg.enabled && cfg.apiKey.trim().length > 0;
+  return cfg.enabled && effectiveApiKey(cfg).length > 0;
 }
 
 /** Trigger condition: the free rules path is unsure about this receipt. */
@@ -82,7 +83,7 @@ export async function runVisionAssist(
 export async function testVisionConnection(
   cfg: VisionConfig,
 ): Promise<{ ok: boolean; message: string }> {
-  if (!cfg.apiKey.trim()) return { ok: false, message: "Add an API key first." };
+  if (!effectiveApiKey(cfg)) return { ok: false, message: "Add an API key first." };
   try {
     const blob = await tinyTestImage();
     await getVisionProvider(cfg).extract(blob, { currencyDefault: "USD" });

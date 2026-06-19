@@ -6,6 +6,15 @@ import { VitePWA } from "vite-plugin-pwa";
 // (Netlify/Vercel) or a project subpath (GitHub Pages) — no config needed.
 export default defineConfig({
   base: "./",
+  // Inject the optional built-in OpenRouter free key at build time so it lives
+  // in your deployment's bundle, never in source. Set OPENROUTER_API_KEY (or
+  // VITE_OPENROUTER_FREE_KEY) in the build env to enable the zero-click free
+  // vision tier; omit it to keep everything on-device. (dist/ is gitignored.)
+  define: {
+    __OPENROUTER_FREE_KEY__: JSON.stringify(
+      process.env.OPENROUTER_API_KEY ?? process.env.VITE_OPENROUTER_FREE_KEY ?? "",
+    ),
+  },
   build: {
     target: "es2021",
     // The Tesseract OCR core is a ~3.4 MB wasm payload; let Workbox precache it

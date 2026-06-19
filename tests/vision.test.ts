@@ -5,6 +5,11 @@ import {
   parseVisionJson,
 } from "../src/pipeline/vision/schema.ts";
 import { usesFreeRouting } from "../src/pipeline/vision/providers/openrouter.ts";
+import {
+  effectiveApiKey,
+  hasBuiltInOpenRouterKey,
+  type VisionConfig,
+} from "../src/pipeline/vision/config.ts";
 
 // Tier 3 (vision LLM) JSON → Extraction mapping. The network call is provider
 // code; this validates the normalization that every provider feeds into.
@@ -75,4 +80,29 @@ test("OpenRouter free routing is detected for the router and :free models", () =
   assert.equal(usesFreeRouting("qwen/qwen2.5-vl-72b-instruct:free"), true);
   assert.equal(usesFreeRouting("anthropic/claude-haiku-4.5"), false);
   assert.equal(usesFreeRouting("google/gemini-2.5-flash"), false);
+});
+
+test("the built-in free key backs only the OpenRouter free router", () => {
+  const cfg = (over: Partial<VisionConfig>): VisionConfig => ({
+    enabled: true,
+    provider: "openrouter",
+    model: "openrouter/free",
+    apiKey: "",
+    baseUrl: "",
+    spendCapUsd: 1,
+    spentUsd: 0,
+    ...over,
+  });
+  const BUILT_IN = "sk-built-in"; // injected; production value comes from the build env
+  // Free router, no user key → built-in key.
+  assert.equal(effectiveApiKey(cfg({}), BUILT_IN), BUILT_IN);
+  // A user's own key always wins.
+  assert.equal(effectiveApiKey(cfg({ apiKey: "sk-mine" }), BUILT_IN), "sk-mine");
+  // A paid OpenRouter model never uses the built-in key.
+  assert.equal(effectiveApiKey(cfg({ model: "anthropic/claude-haiku-4.5" }), BUILT_IN), "");
+  // Other providers never use the built-in key.
+  assert.equal(effectiveApiKey(cfg({ provider: "anthropic", model: "claude-haiku-4-5" }), BUILT_IN), "");
+  // A keyless build (this test env) injects nothing and uses no built-in key.
+  assert.equal(effectiveApiKey(cfg({})), "");
+  assert.equal(hasBuiltInOpenRouterKey(), false);
 });

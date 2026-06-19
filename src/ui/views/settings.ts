@@ -4,6 +4,7 @@ import { formatMoney } from "../../util/money.ts";
 import {
   getVisionConfig,
   saveVisionConfig,
+  hasBuiltInOpenRouterKey,
   PROVIDERS,
   type VisionConfig,
 } from "../../pipeline/vision/config.ts";
@@ -124,11 +125,15 @@ export class SettingsModal {
       placeholder: meta.defaultModel,
     });
 
+    const isOpenRouter = this.cfg.provider === "openrouter";
+    const builtInKey = isOpenRouter && hasBuiltInOpenRouterKey();
     const apiKey = el("input", {
       type: "password",
       "data-f": "apiKey",
       value: this.cfg.apiKey,
-      placeholder: "sk-…  (stored only in this browser)",
+      placeholder: builtInKey
+        ? "leave blank to use the built-in free key"
+        : "sk-…  (stored only in this browser)",
       autocomplete: "off",
     });
 
@@ -170,6 +175,12 @@ export class SettingsModal {
       frow("Model", model),
       modelList,
       frow("API key", apiKey),
+      builtInKey
+        ? el("p", { class: "settings-note" }, [
+            "A built-in free key is bundled for the free router — leave this blank to " +
+              "use it, or paste your own (yours always wins).",
+          ])
+        : null,
       frow("Proxy URL", baseUrl),
       frow("Spend cap (USD)", cap),
       el("p", { class: "settings-note" }, [
